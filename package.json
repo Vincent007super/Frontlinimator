@@ -1,0 +1,27 @@
+{
+  "name": "frontlinimator",
+  "version": "1.0.0",
+  "description": "Website for making funny frontline animations",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Vincent007super/Frontlinimator.git"
+  },
+  "keywords": [
+    "Frontline",
+    "animation"
+  ],
+  "author": "Vincent Hoogenraat",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Vincent007super/Frontlinimator/issues"
+  },
+  "homepage": "https://github.com/Vincent007super/Frontlinimator#readme",
+  "dependencies": {
+    "d3": "^7.9.0",
+    "leaflet": "^1.9.4"
+  }
+}
