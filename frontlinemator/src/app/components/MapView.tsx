@@ -3,44 +3,13 @@
 import { MapContainer, TileLayer, GeoJSON, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useEffect, useState } from 'react';
-import type { LatLngExpression } from 'leaflet';
-
-function arePointsClose(p1: number[], p2: number[], threshold = 0.01) {
-  return (
-    Math.abs(p1[0] - p2[0]) < threshold &&
-    Math.abs(p1[1] - p2[1]) < threshold
-  );
-}
-
-function extractBorderCoords(feature: any): number[][] {
-  const geom = feature.geometry;
-  if (geom.type === 'Polygon') {
-    return geom.coordinates.flat();
-  } else if (geom.type === 'MultiPolygon') {
-    return geom.coordinates.flat(2);
-  }
-  return [];
-}
-
-function findSharedBorderCoords(coords1: number[][], coords2: number[][]): LatLngExpression[] {
-  const shared: LatLngExpression[] = [];
-
-  for (const point1 of coords1) {
-    for (const point2 of coords2) {
-      if (arePointsClose(point1, point2)) {
-        shared.push([point1[1], point1[0]]); // [lat, lng] for Leaflet
-        break;
-      }
-    }
-  }
-
-  return shared;
-}
+import { LatLngExpression } from 'leaflet';
+import { getSharedBorders } from '../utils/getSharedBorders';
 
 export default function MapView() {
   const [geoData, setGeoData] = useState<any>(null);
   const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
-  const [frontlineCoords, setFrontlineCoords] = useState<LatLngExpression[]>([]);
+  const [frontlines, setFrontlines] = useState<LatLngExpression[][]>([]);
 
   useEffect(() => {
     fetch('/data/world_highres.geo.json')
@@ -48,7 +17,33 @@ export default function MapView() {
       .then((data) => setGeoData(data));
   }, []);
 
-  // Detect real border between countries
+  // 🧠 Sort points into a visually continuous line
+  function sortByDistance(points: [number, number][]): [number, number][] {
+    if (points.length <= 1) return points;
+
+    const sorted: [number, number][] = [points[0]];
+    const remaining = points.slice(1);
+
+    while (remaining.length) {
+      const last = sorted[sorted.length - 1];
+      let closestIdx = 0;
+      let closestDist = Infinity;
+
+      for (let i = 0; i < remaining.length; i++) {
+        const [lat, lng] = remaining[i];
+        const dist = Math.hypot(lat - last[0], lng - last[1]);
+        if (dist < closestDist) {
+          closestDist = dist;
+          closestIdx = i;
+        }
+      }
+
+      sorted.push(remaining.splice(closestIdx, 1)[0]);
+    }
+
+    return sorted;
+  }
+
   useEffect(() => {
     if (selectedCountries.length === 2 && geoData) {
       const [country1, country2] = selectedCountries;
@@ -62,15 +57,17 @@ export default function MapView() {
 
       if (!feature1 || !feature2) return;
 
-      const coords1 = extractBorderCoords(feature1);
-      const coords2 = extractBorderCoords(feature2);
-      const sharedBorder = findSharedBorderCoords(coords1, coords2);
+      const shared = getSharedBorders(feature1, feature2);
 
-      if (sharedBorder.length === 0) {
-        console.warn(`${country1} and ${country2} do not border each other.`);
-        setFrontlineCoords([]);
+      if (shared.length > 0) {
+        const cleaned = shared
+          .filter(segment => segment.length > 1)
+          .map(sortByDistance);
+
+        setFrontlines(cleaned);
       } else {
-        setFrontlineCoords(sharedBorder);
+        alert('No shared border found between selected countries!');
+        setFrontlines([]);
       }
     }
   }, [selectedCountries, geoData]);
@@ -89,7 +86,7 @@ export default function MapView() {
             return prev;
           }
         });
-      }
+      },
     });
 
     layer.bindTooltip(name);
@@ -97,7 +94,6 @@ export default function MapView() {
 
   const getStyle = (feature: any) => {
     const name = feature.properties.ADMIN;
-
     if (selectedCountries.includes(name)) {
       const color = selectedCountries.indexOf(name) === 0 ? 'blue' : 'red';
       return {
@@ -117,27 +113,48 @@ export default function MapView() {
   };
 
   return (
-    <MapContainer
-      center={[51.505, 10]}
-      zoom={4}
-      style={{ height: '100vh', width: '100%' }}
-    >
-      <TileLayer
-        attribution='&copy; OpenStreetMap contributors'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
-      {geoData && (
-        <>
+    <>
+      <button
+        onClick={() => setFrontlines([])}
+        style={{
+          position: 'absolute',
+          top: 10,
+          left: 10,
+          zIndex: 1000,
+          padding: '8px 12px',
+          background: 'white',
+          border: '1px solid gray',
+          borderRadius: '4px',
+          cursor: 'pointer',
+        }}
+      >
+        Clear Frontlines
+      </button>
+
+      <MapContainer
+        center={[51.505, 10]}
+        zoom={5}
+        style={{ height: '100vh', width: '100%' }}
+      >
+        <TileLayer
+          attribution="&copy; OpenStreetMap contributors"
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        {geoData && (
           <GeoJSON
             data={geoData}
             onEachFeature={onEachCountry}
             style={getStyle}
           />
-          {frontlineCoords.length > 0 && (
-            <Polyline positions={frontlineCoords} pathOptions={{ color: 'darkRed', weight: 3 }} />
-          )}
-        </>
-      )}
-    </MapContainer>
+        )}
+        {frontlines.map((line, idx) => (
+          <Polyline
+            key={idx}
+            positions={line}
+            pathOptions={{ color: 'red', weight: 3 }}
+          />
+        ))}
+      </MapContainer>
+    </>
   );
 }
