@@ -5,6 +5,15 @@ import 'leaflet/dist/leaflet.css';
 import { useEffect, useState } from 'react';
 import { LatLngExpression } from 'leaflet';
 import { getSharedBorders } from '../utils/getSharedBorders';
+import { Marker } from 'react-leaflet';
+import L from 'leaflet';
+
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
+});
 
 export default function MapView() {
   const [geoData, setGeoData] = useState<any>(null);
@@ -35,6 +44,7 @@ export default function MapView() {
         if (dist < closestDist) {
           closestDist = dist;
           closestIdx = i;
+          console.log(`From ${last} to ${remaining[closestIdx]} = ${closestDist}`);
         }
       }
 
@@ -153,7 +163,16 @@ export default function MapView() {
             positions={line}
             pathOptions={{ color: 'red', weight: 3 }}
           />
-        ))}
+        ))},
+        {/* {frontlines.map((line, lineIdx) =>
+          line.map((point, i) => (
+            <Marker
+              key={`marker-${lineIdx}-${i}`}
+              position={point}
+              title={`Line ${lineIdx}, Point ${i}`}
+            />
+          ))
+        )} */}
       </MapContainer>
     </>
   );
