@@ -1,11 +1,11 @@
 'use client';
 
-import { MapContainer, TileLayer, GeoJSON, Polyline } from 'react-leaflet';
+import { MapContainer, TileLayer, GeoJSON, Polyline, Marker } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { LatLngExpression } from 'leaflet';
 import { getSharedBorders } from '../utils/getSharedBorders';
-import { Marker } from 'react-leaflet';
+import { animateFrontlineStep } from '../utils/animateFrontline';
 import L from 'leaflet';
 
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -19,6 +19,8 @@ export default function MapView() {
   const [geoData, setGeoData] = useState<any>(null);
   const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
   const [frontlines, setFrontlines] = useState<LatLngExpression[][]>([]);
+  const [poi, setPoi] = useState<{ lat: number; lng: number } | null>(null);
+  const animationRef = useRef<number | null>(null);
 
   useEffect(() => {
     fetch('/data/world_highres.geo.json')
@@ -26,7 +28,6 @@ export default function MapView() {
       .then((data) => setGeoData(data));
   }, []);
 
-  // 🧠 Sort points into a visually continuous line
   function sortByDistance(points: [number, number][]): [number, number][] {
     if (points.length <= 1) return points;
 
@@ -44,7 +45,6 @@ export default function MapView() {
         if (dist < closestDist) {
           closestDist = dist;
           closestIdx = i;
-          console.log(`From ${last} to ${remaining[closestIdx]} = ${closestDist}`);
         }
       }
 
@@ -57,30 +57,65 @@ export default function MapView() {
   useEffect(() => {
     if (selectedCountries.length === 2 && geoData) {
       const [country1, country2] = selectedCountries;
-
-      const feature1 = geoData.features.find(
-        (f: any) => f.properties.ADMIN === country1
-      );
-      const feature2 = geoData.features.find(
-        (f: any) => f.properties.ADMIN === country2
-      );
+      const feature1 = geoData.features.find((f: any) => f.properties.ADMIN === country1);
+      const feature2 = geoData.features.find((f: any) => f.properties.ADMIN === country2);
 
       if (!feature1 || !feature2) return;
 
       const shared = getSharedBorders(feature1, feature2);
+      const cleaned = shared
+        .filter(segment => segment.length > 1)
+        .map(sortByDistance);
 
-      if (shared.length > 0) {
-        const cleaned = shared
-          .filter(segment => segment.length > 1)
-          .map(sortByDistance);
-
-        setFrontlines(cleaned);
-      } else {
-        alert('No shared border found between selected countries!');
-        setFrontlines([]);
-      }
+      setFrontlines(cleaned);
     }
   }, [selectedCountries, geoData]);
+
+  const startAnimation = () => {
+    if (!poi || frontlines.length === 0) return;
+
+    const lineToAnimate = [...frontlines];
+    const targetIdx = findLongestIndex(lineToAnimate);
+
+    const step = () => {
+      const now = Date.now();
+      const baseLine = lineToAnimate[targetIdx];
+
+      if (!baseLine) return;
+
+      const objectified = baseLine.map(([lat, lng]) => ({ lat, lng }));
+      const animated = animateFrontlineStep(objectified, poi, 0.01, 0.002, now);
+
+      // convert back to [lat, lng]
+      lineToAnimate[targetIdx] = animated.map(p => [p.lat, p.lng]);
+
+      setFrontlines([...lineToAnimate]);
+      animationRef.current = requestAnimationFrame(step);
+    };
+
+    console.log("Frontline segments:");
+    frontlines.forEach((line, idx) => {
+      console.log(`Line ${idx}: ${line.length} points`);
+    });
+    animationRef.current = requestAnimationFrame(step);
+  };
+
+  const findLongestIndex = (lines: LatLngExpression[][]): number => {
+    let max = 0;
+    let idx = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].length > max) {
+        max = lines[i].length;
+        idx = i;
+      }
+    }
+    return idx;
+  };
+
+  const stopAnimation = () => {
+    if (animationRef.current) cancelAnimationFrame(animationRef.current);
+    animationRef.current = null;
+  };
 
   const onEachCountry = (feature: any, layer: any) => {
     const name = feature.properties.ADMIN;
@@ -124,22 +159,29 @@ export default function MapView() {
 
   return (
     <>
-      <button
-        onClick={() => setFrontlines([])}
+      <div
         style={{
           position: 'absolute',
           top: 10,
-          left: 10,
+          right: 10,
           zIndex: 1000,
-          padding: '8px 12px',
+          padding: '8px',
           background: 'white',
+          color: 'black',
+          fontWeight: 'bold',
+          fontSize: '1vw',
           border: '1px solid gray',
           borderRadius: '4px',
-          cursor: 'pointer',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '4px',
         }}
       >
-        Clear Frontlines
-      </button>
+        <button onClick={() => { setFrontlines([]); setPoi(null); stopAnimation(); }}>Clear</button>
+        <button onClick={() => setPoi({ lat: 51.5, lng: 10 })}>Place POI</button>
+        <button onClick={startAnimation}>Render</button>
+        <button onClick={stopAnimation}>Stop</button>
+      </div>
 
       <MapContainer
         center={[51.505, 10]}
@@ -161,18 +203,22 @@ export default function MapView() {
           <Polyline
             key={idx}
             positions={line}
-            pathOptions={{ color: 'red', weight: 3 }}
+            pathOptions={{ color: 'purple', weight: 6 }}
           />
-        ))},
-        {/* {frontlines.map((line, lineIdx) =>
-          line.map((point, i) => (
-            <Marker
-              key={`marker-${lineIdx}-${i}`}
-              position={point}
-              title={`Line ${lineIdx}, Point ${i}`}
-            />
-          ))
-        )} */}
+        ))}
+
+        {poi && (
+          <Marker
+            position={poi}
+            draggable
+            eventHandlers={{
+              dragend: (e) => {
+                const { lat, lng } = e.target.getLatLng();
+                setPoi({ lat, lng });
+              },
+            }}
+          />
+        )}
       </MapContainer>
     </>
   );

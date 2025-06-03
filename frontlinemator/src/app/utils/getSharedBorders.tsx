@@ -1,33 +1,87 @@
 import * as turf from '@turf/turf';
 import {
   Feature,
-  GeoJsonProperties,
   Polygon,
   MultiPolygon
 } from 'geojson';
 
-// Compare two segments and return true if their points are very close
-function segmentsAreClose(seg1: turf.Feature<turf.LineString>, seg2: turf.Feature<turf.LineString>, threshold = 0.001): boolean {
-  const coords1 = seg1.geometry.coordinates;
-  const coords2 = seg2.geometry.coordinates;
+function segmentsAreClose(
+  seg1: turf.Feature<turf.LineString>,
+  seg2: turf.Feature<turf.LineString>,
+  threshold = 0.0005
+): boolean {
+  const [lon1a, lat1a] = seg1.geometry.coordinates[0];
+  const [lon1b, lat1b] = seg1.geometry.coordinates[1];
 
-  for (let i = 0; i < coords1.length; i++) {
-    const [lon1, lat1] = coords1[i];
-    for (let j = 0; j < coords2.length; j++) {
-      const [lon2, lat2] = coords2[j];
-      const dist = Math.hypot(lat1 - lat2, lon1 - lon2);
-      if (dist < threshold) {
-        return true;
+  const [lon2a, lat2a] = seg2.geometry.coordinates[0];
+  const [lon2b, lat2b] = seg2.geometry.coordinates[1];
+
+  const close = (a: number[], b: number[]) =>
+    Math.hypot(a[0] - b[0], a[1] - b[1]) < threshold;
+
+  return (
+    close([lon1a, lat1a], [lon2a, lat2a]) ||
+    close([lon1a, lat1a], [lon2b, lat2b]) ||
+    close([lon1b, lat1b], [lon2a, lat2a]) ||
+    close([lon1b, lat1b], [lon2b, lat2b])
+  );
+}
+
+function mergeSegments(segments: [number, number][][]): [number, number][][] {
+  const used = new Set<number>();
+  const chains: [number, number][][] = [];
+
+  for (let i = 0; i < segments.length; i++) {
+    if (used.has(i)) continue;
+
+    const chain: [number, number][] = [...segments[i]];
+    used.add(i);
+
+    let extended = true;
+    while (extended) {
+      extended = false;
+
+      for (let j = 0; j < segments.length; j++) {
+        if (used.has(j)) continue;
+
+        const seg = segments[j];
+        const first = chain[0];
+        const last = chain[chain.length - 1];
+
+        if (pointsEqual(seg[0], last)) {
+          chain.push(seg[1]);
+          used.add(j);
+          extended = true;
+        } else if (pointsEqual(seg[1], last)) {
+          chain.push(seg[0]);
+          used.add(j);
+          extended = true;
+        } else if (pointsEqual(seg[0], first)) {
+          chain.unshift(seg[1]);
+          used.add(j);
+          extended = true;
+        } else if (pointsEqual(seg[1], first)) {
+          chain.unshift(seg[0]);
+          used.add(j);
+          extended = true;
+        }
       }
     }
+
+    chains.push(chain);
   }
-  return false;
+
+  return chains;
+}
+
+function pointsEqual(a: [number, number], b: [number, number]): boolean {
+  return Math.abs(a[0] - b[0]) < 0.0001 && Math.abs(a[1] - b[1]) < 0.0001;
 }
 
 export function getSharedBorders(
-  feature1: Feature,
-  feature2: Feature,
-  threshold = 0.001
+  feature1: Feature<Polygon | MultiPolygon>,
+  feature2: Feature<Polygon | MultiPolygon>,
+  threshold = 0.0005
 ): Array<[number, number][]> {
   const borders: Array<[number, number][]> = [];
 
@@ -42,18 +96,18 @@ export function getSharedBorders(
     turf.lineSegment(f).features
   );
 
-  console.log(`🟦 Comparing segments: ${segments1.length} from A vs ${segments2.length} from B`);
+  const matchedSegments: [number, number][][] = [];
 
   for (const seg1 of segments1) {
     for (const seg2 of segments2) {
       if (segmentsAreClose(seg1, seg2, threshold)) {
-        const coords = seg1.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
-        borders.push(coords);
+        const coords = seg1.geometry.coordinates.map(([lon, lat]) => [lat, lon]); // convert to [lat, lng]
+        matchedSegments.push(coords);
       }
     }
   }
 
-  console.log(`✅ Found ${borders.length} shared segments.`);
-
-  return borders;
+  // 🧠 Merge into chains
+  const merged = mergeSegments(matchedSegments);
+  return merged;
 }
