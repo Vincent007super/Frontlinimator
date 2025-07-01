@@ -1,9 +1,5 @@
 import * as turf from '@turf/turf';
-import {
-  Feature,
-  Polygon,
-  MultiPolygon
-} from 'geojson';
+import { Feature, Polygon, MultiPolygon } from 'geojson';
 
 function segmentsAreClose(
   seg1: turf.Feature<turf.LineString>,
@@ -12,7 +8,6 @@ function segmentsAreClose(
 ): boolean {
   const [lon1a, lat1a] = seg1.geometry.coordinates[0];
   const [lon1b, lat1b] = seg1.geometry.coordinates[1];
-
   const [lon2a, lat2a] = seg2.geometry.coordinates[0];
   const [lon2b, lat2b] = seg2.geometry.coordinates[1];
 
@@ -23,7 +18,7 @@ function segmentsAreClose(
     close([lon1a, lat1a], [lon2a, lat2a]) ||
     close([lon1a, lat1a], [lon2b, lat2b]) ||
     close([lon1b, lat1b], [lon2a, lat2a]) ||
-    close([lon1b, lat1b], [lon2b, lat2b])
+    close([lon1b, lat1b], [lon2b, lat2b]) 
   );
 }
 
@@ -82,32 +77,23 @@ export function getSharedBorders(
   feature1: Feature<Polygon | MultiPolygon>,
   feature2: Feature<Polygon | MultiPolygon>,
   threshold = 0.0005
-): Array<[number, number][]> {
-  const borders: Array<[number, number][]> = [];
-
+): [number, number][][] {
   const flat1 = turf.flatten(feature1);
   const flat2 = turf.flatten(feature2);
 
-  const segments1 = flat1.features.flatMap(f =>
-    turf.lineSegment(f).features
-  );
+  const segs1 = flat1.features.flatMap(f => turf.lineSegment(f).features);
+  const segs2 = flat2.features.flatMap(f => turf.lineSegment(f).features);
 
-  const segments2 = flat2.features.flatMap(f =>
-    turf.lineSegment(f).features
-  );
+  const matches: [number, number][][] = [];
 
-  const matchedSegments: [number, number][][] = [];
-
-  for (const seg1 of segments1) {
-    for (const seg2 of segments2) {
+  for (const seg1 of segs1) {
+    for (const seg2 of segs2) {
       if (segmentsAreClose(seg1, seg2, threshold)) {
-        const coords = seg1.geometry.coordinates.map(([lon, lat]) => [lat, lon]); // convert to [lat, lng]
-        matchedSegments.push(coords);
+        const coords = seg1.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+        matches.push(coords);
       }
     }
   }
 
-  // 🧠 Merge into chains
-  const merged = mergeSegments(matchedSegments);
-  return merged;
+  return mergeSegments(matches);
 }
